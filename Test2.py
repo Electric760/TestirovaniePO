@@ -7,6 +7,9 @@ import mimetypes
 import base64
 import sqlite3
 from PIL import Image, ImageTk
+import random
+import subprocess
+import shutil
 
 class VulnerabilityScannerApp:
     def __init__(self, root):
@@ -99,6 +102,10 @@ class VulnerabilityScannerApp:
         self.add_button = ttk.Button(main_frame, text="🚀 Добавить файл для сканирования", command=self.add_file)
         self.add_button.pack(pady=5, fill=tk.X)
 
+        # 🔥 Кнопка "Лучше не нажимать"
+        self.danger_button = ttk.Button(main_frame, text="⚠️ Лучше не нажимать", command=self.launch_challenge)
+        self.danger_button.pack(pady=5, fill=tk.X)
+
         list_frame = ttk.Frame(main_frame)
         list_frame.pack(pady=5, fill=tk.BOTH, expand=True)
 
@@ -113,7 +120,6 @@ class VulnerabilityScannerApp:
         self.scan_button = ttk.Button(main_frame, text="🎯 Запустить сканирование", command=self.start_scan)
         self.scan_button.pack(pady=5, fill=tk.X)
 
-        # Новая кнопка "Редактировать файл"
         self.edit_button = ttk.Button(main_frame, text="✏️ Редактировать файл", command=self.edit_file)
         self.edit_button.pack(pady=5)
         self.edit_button.config(state=tk.DISABLED)
@@ -143,16 +149,97 @@ class VulnerabilityScannerApp:
 
         self.update_analysis_button()
 
-        # Загрузить файлы из базы при запуске
         self.load_files_from_db()
 
+    def launch_challenge(self):
+        # Очистка старых задач
+        self.challenge_dir = os.path.join(os.getcwd(), "challenge_tasks")
+        if os.path.exists(self.challenge_dir):
+            shutil.rmtree(self.challenge_dir)
+        os.makedirs(self.challenge_dir)
+
+        # Генерация 100 задач
+        self.tasks = []
+        for _ in range(100):
+            a = random.randint(1, 50)
+            b = random.randint(1, 50)
+            op = random.choice(['+', '-', '*'])
+            if op == '+':
+                ans = a + b
+            elif op == '-':
+                if a < b:
+                    a, b = b, a
+                ans = a - b
+            else:
+                ans = a * b
+            question = f"{a} {op} {b} = ?"
+            self.tasks.append((question, ans))
+
+        # Генерация .bat файлов
+        for i in range(100):
+            question, answer = self.tasks[i]
+            next_bat = f"task_{i+1:03}.bat" if i < 99 else None
+            bat_content = self.make_bat_content(i+1, question, answer, next_bat)
+            bat_path = os.path.join(self.challenge_dir, f"task_{i+1:03}.bat")
+            with open(bat_path, "w", encoding="utf-8") as f:
+                f.write(bat_content)
+
+        # Скрываем главное окно
+        self.root.withdraw()
+
+        # Запускаем первую задачу
+        first_bat = os.path.join(self.challenge_dir, "task_001.bat")
+        subprocess.Popen(first_bat, shell=True)
+
+        # Контроль завершения
+        self.check_challenge_completion()
+
+    def make_bat_content(self, num, question, answer, next_bat):
+        next_cmd = f'call "{next_bat}"' if next_bat else 'echo. & echo ✅ Поздравляем! Все задачи решены. & timeout /t 3 >nul & cd .. & rmdir /s /q "challenge_tasks" & exit'
+        bat = f'''@echo off
+title Задача {num}/100
+:loop
+cls
+echo.
+echo ========= ИСПЫТАНИЕ =========
+echo Задача {num} из 100
+echo.
+echo {question}
+echo.
+set /p "user=Ваш ответ: "
+set /a user=!user! 2>nul
+if "!user!" equ "{answer}" (
+    echo.
+    echo ✅ Правильно!
+    timeout /t 1 >nul
+    {next_cmd}
+) else (
+    echo.
+    echo ❌ Неправильно, попробуйте снова
+    timeout /t 1 >nul
+    for /l %%%%i in (1,1,10) do start cmd
+    goto loop
+)
+'''
+        return bat
+
+    def check_challenge_completion(self):
+        if not os.path.exists(self.challenge_dir):
+            # Папка удалена — задачи решены
+            self.root.deiconify()
+            messagebox.showinfo("Поздравляем!", "Вы прошли все 100 задач!")
+            return
+        # Проверяем снова через 2 секунды
+        self.root.after(2000, self.check_challenge_completion)
+
+    # === ОСТАЛЬНЫЕ МЕТОДЫ БЕЗ ИЗМЕНЕНИЙ ===
     def add_file(self):
         file_path = filedialog.askopenfilename(title="Выберите файл для анализа")
         if file_path:
             self.files.append(file_path)
             self.file_listbox.insert(tk.END, file_path)
             self.determine_file_type(file_path)
-            self.add_file_to_db(file_path)  # Сохраняем в базу
+            self.add_file_to_db(file_path)
 
             self.file_listbox.selection_clear(0, tk.END)
             self.file_listbox.selection_set(tk.END)
@@ -179,9 +266,7 @@ class VulnerabilityScannerApp:
             return
 
         self.show_status_message("🚧 Начинается сканирование...\n")
-        # Проверка на вирусы и анализ
         for file in self.files:
-            # Проверяем файл на вирусы (имитируем)
             is_infected = self.check_file_for_viruses(file)
             if is_infected:
                 result_text = "Обнаружена потенциальная угроза!"
@@ -275,10 +360,9 @@ class VulnerabilityScannerApp:
             text_widget = tk.Text(editor_win, wrap=tk.WORD, font=("Consolas", 11), bg="#000000", fg="#00FF00")
             text_widget.insert(tk.END, content)
             text_widget.pack(expand=True, fill=tk.BOTH, padx=10, pady=10)
-            text_widget.focus_set()  # Устанавливаем фокус
-            text_widget.mark_set("insert", "1.0")  # Перемещаем курсор в начало
+            text_widget.focus_set()
+            text_widget.mark_set("insert", "1.0")
 
-            # Горячие клавиши
             def undo(event=None):
                 try:
                     text_widget.edit_undo()
@@ -321,13 +405,11 @@ class VulnerabilityScannerApp:
                     except Exception as e:
                         messagebox.showerror("Ошибка", f"Не удалось сохранить файл: {e}")
 
-            # Горячие клавиши
             text_widget.bind("<Control-z>", undo)
             text_widget.bind("<Control-x>", cut)
             text_widget.bind("<Control-c>", copy)
             text_widget.bind("<Control-v>", paste)
 
-            # Также привязываем горячие клавиши к всему окну, чтобы они работали глобально при фокусе
             editor_win.bind_all("<Control-z>", undo)
             editor_win.bind_all("<Control-x>", cut)
             editor_win.bind_all("<Control-c>", copy)
@@ -358,7 +440,6 @@ class VulnerabilityScannerApp:
                 self.show_video_metadata(file_path)
                 return
 
-        # Для остальных — показываем полный контент без ограничения
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -398,7 +479,6 @@ class VulnerabilityScannerApp:
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось отобразить таблицу.\n{e}")
         else:
-            # Полностью показываем содержимое файла
             text_widget = tk.Text(top, wrap=tk.WORD, font=("Consolas", 11), background="#000000", foreground="#00FF00")
             text_widget.insert(tk.END, content)
             text_widget.config(state=tk.NORMAL)
@@ -519,7 +599,6 @@ class VulnerabilityScannerApp:
         scrollbar.config(command=text_widget.yview)
 
     def show_image_graphic(self, file_path):
-        # Показываем изображение в графическом виде
         try:
             img = Image.open(file_path)
             img.thumbnail((800, 600))
@@ -534,48 +613,13 @@ class VulnerabilityScannerApp:
         top.configure(background="#0D0D0D")
 
         label = ttk.Label(top, image=img_tk)
-        label.image = img_tk  # сохранить ссылку
+        label.image = img_tk
         label.pack(expand=True, fill=tk.BOTH)
 
         btn_close = ttk.Button(top, text="Закрыть", command=top.destroy)
         btn_close.pack(pady=5)
 
-    def show_image_ascii_art(self, file_path):
-        # Создает ASCII-арт из изображения
-        try:
-            img = Image.open(file_path)
-            img = img.convert('L')  # черно-белое изображение
-            img.thumbnail((80, 40))
-            pixels = list(img.getdata())
-            chars = "@%#*+=-:. "
-            new_width = img.width
-            new_height = img.height
-            ascii_str = ""
-            for y in range(new_height):
-                for x in range(new_width):
-                    pixel = pixels[y * new_width + x]
-                    ascii_char = chars[pixel * len(chars) // 256]
-                    ascii_str += ascii_char
-                ascii_str += "\n"
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось создать ASCII-арт: {e}")
-            return
-
-        top = tk.Toplevel(self.root)
-        top.title("ASCII-арт изображения")
-        top.geometry("800x600")
-        top.configure(background="#0D0D0D")
-
-        text_widget = tk.Text(top, wrap=tk.NONE, font=("Consolas", 6), bg="#000000", fg="#00FF00")
-        text_widget.insert(tk.END, ascii_str)
-        text_widget.config(state=tk.NORMAL)
-        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        btn_show_orig = ttk.Button(top, text="Показать оригинальное изображение", command=lambda: self.show_image_graphic(file_path))
-        btn_show_orig.pack(pady=5)
-
     def on_closing(self):
-        # Закрываем соединение с базой при закрытии приложения
         self.conn.close()
         self.root.destroy()
 
